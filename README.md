@@ -25,6 +25,202 @@ This tool provides:
 - **Comprehensive test suite** with 103 unit tests covering BIP-352, BIP-340 (Schnorr), and BIP-341 (Taproot)
 - **Modular codebase** (~4,550 lines) organized into focused modules
 
+## Usage
+
+### First Time Setup
+
+**Note**: Using a virtual environment is **strongly recommended but not required**. It isolates dependencies and prevents conflicts with other Python projects. If you choose not to use a venv, you can install dependencies directly with `pip install -r requirements.txt` and skip the activation/deactivation steps.
+
+```bash
+# 1. Clone the repository (if not already done)
+git clone https://github.com/levinster82/sptools-py.git
+cd sptools-py
+
+# 2. Create a virtual environment
+python3 -m venv venv
+
+# 3. Activate the virtual environment
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate  # Windows
+
+# You should see (venv) at the start of your command prompt
+
+# 4. Install dependencies
+pip install -r requirements.txt
+
+# 5. Verify installation
+python spspend.py --help
+
+# 6. When finished, deactivate the virtual environment
+deactivate
+```
+
+### As a Command-Line Tool
+
+```bash
+# Interactive mode (will prompt for keys)
+python spspend.py
+
+# With arguments
+python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY -b 890000
+
+# Export to JSON
+python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --export utxos.json
+
+# With Electrum server for status checking
+python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY \
+    --electrum-server electrum.blockstream.info
+```
+
+#### Full Command-Line Options
+
+```
+usage: spspend.py [-h] [--host HOST] [--port PORT] [--plain-tcp]
+                  [--no-verify-cert] [--timeout TIMEOUT]
+                  [--electrum-server ELECTRUM_HOST]
+                  [--electrum-port ELECTRUM_PORT]
+                  [--scan-key SCAN_PRIVATE_KEY] [--spend-key SPEND_PUBLIC_KEY]
+                  [--spend-privkey SPEND_PRIVATE_KEY] [--start START]
+                  [--export EXPORT_FILE] [--quiet] [--ignore-spent]
+                  [--network {mainnet,testnet,testnet4,signet,regtest}]
+                  [--log-level {DEBUG,INFO,WARNING,ERROR}] [--version]
+
+Silent Payments UTXO Discovery Tool - Find and display Silent Payment UTXOs
+
+options:
+  -h, --help            show this help message and exit
+  --network, -n {mainnet,testnet,testnet4,signet,regtest}
+                        Bitcoin network to use (default: mainnet)
+  --log-level, -l {DEBUG,INFO,WARNING,ERROR}
+                        Logging level (default: INFO)
+  --version, -v         show program's version number and exit
+
+connection options:
+  --host, -H HOST       Frigate server host (default: 127.0.0.1)
+  --port, -p PORT       Frigate server port (default: 57002 for SSL, 57001 for
+                        TCP)
+  --plain-tcp           Use plain TCP instead of SSL (default: SSL)
+  --no-verify-cert      Disable SSL certificate verification (default:
+                        enabled)
+  --timeout TIMEOUT     Socket timeout in seconds (default: no timeout)
+
+electrum server options (optional):
+  --electrum-server ELECTRUM_HOST
+                        Electrum server host for UTXO status checking (e.g.,
+                        electrum.blockstream.info)
+  --electrum-port ELECTRUM_PORT
+                        Electrum server port (default: 50002 for SSL, 50001
+                        for TCP)
+
+key options:
+  --scan-key, -s SCAN_PRIVATE_KEY
+                        Scan private key (64 hex characters)
+  --spend-key, -S SPEND_PUBLIC_KEY
+                        Spend public key (66 hex characters)
+  --spend-privkey, -P SPEND_PRIVATE_KEY
+                        Spend private key (64 hex characters) - OPTIONAL: If
+                        provided, will derive private keys for each UTXO
+
+scanning options:
+  --start, -b START     Start block height or timestamp
+  --export, -e EXPORT_FILE
+                        Export UTXOs to JSON file
+  --quiet, -q           Disable progress output
+  --ignore-spent        TESTING ONLY: Ignore spent status when offering to
+                        sweep UTXOs
+
+Examples:
+  # Interactive mode
+  spspend.py
+
+  # Discover UTXOs with specific keys
+  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY
+
+  # Start scanning from specific block
+  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY -b 890000
+
+  # Export UTXOs to JSON file
+  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --export utxos.json
+
+  # Use Electrum server for UTXO status checking
+  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --electrum-server electrum.blockstream.info
+```
+
+### As a Python Library
+
+**Note**: This interface is currently untested and experimental.
+
+Import and use programmatically:
+
+```python
+import asyncio
+from spspend_lib.backend.clients import SilentPaymentsClient
+from spspend_lib.backend.scanner import SilentPaymentScanner
+from spspend_lib.frontend.events import EventBus
+
+async def scan_for_utxos():
+    # Create client and event bus
+    client = SilentPaymentsClient('localhost', 50001)
+    event_bus = EventBus()
+
+    # Set up event handlers
+    async def on_utxo_found(event):
+        print(f"Found UTXO: {event.data['utxo']}")
+
+    event_bus.on(EventType.UTXO_FOUND, on_utxo_found)
+
+    # Create scanner
+    scanner = SilentPaymentScanner(
+        client=client,
+        scan_private_key="your_scan_key",
+        spend_public_key="your_spend_key",
+        network='mainnet',
+        event_bus=event_bus
+    )
+
+    # Run scan
+    async with client.connect():
+        utxos = await scanner.scan()
+
+    return utxos
+
+# Run it
+utxos = asyncio.run(scan_for_utxos())
+```
+
+### Custom Frontend Example
+
+**Note**: This interface is currently untested and experimental.
+
+Create a custom UI by implementing FrontendInterface:
+
+```python
+from spspend_lib.frontend.base import FrontendInterface
+from spspend_lib.app import SilentPaymentApp
+
+class WebFrontend(FrontendInterface):
+    def __init__(self, websocket):
+        self.ws = websocket
+
+    async def show_scan_progress(self, progress: float, tx_count: int):
+        await self.ws.send_json({
+            'type': 'scan_progress',
+            'progress': progress,
+            'tx_count': tx_count
+        })
+
+    # Implement other abstract methods...
+
+# Use it
+app = SilentPaymentApp(
+    frigate_client=client,
+    electrum_client=None,
+    frontend=WebFrontend(websocket),
+    network='mainnet'
+)
+```
+
 ## Architecture
 
 The application is organized into three main layers:
@@ -217,220 +413,6 @@ def derive_output_pubkey(
 ) -> Tuple[Tuple[int, int], str]:
     # BIP-352 derivation logic...
     return (output_pubkey, t_k_hex)
-```
-
-## Usage
-
-### First Time Setup
-
-If you're loading this repository for the first time:
-
-```bash
-# 1. Clone the repository (if not already done)
-git clone <repository-url>
-cd sptools-py
-
-# 2. Create a virtual environment
-python3 -m venv venv
-
-# 3. Activate the virtual environment
-source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate  # Windows
-
-# You should see (venv) at the start of your command prompt
-
-# 4. Install dependencies
-pip install -r requirements.txt
-
-# 5. Verify installation
-python spspend.py --help
-
-# 6. When finished, deactivate the virtual environment
-deactivate
-```
-
-**Note**: You must activate the virtual environment every time you want to use the tool:
-```bash
-source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate  # Windows
-
-# When done working
-deactivate
-```
-
-### As a Command-Line Tool
-
-Once installed, use the CLI (with venv activated):
-
-```bash
-# Make sure virtual environment is activated
-source venv/bin/activate  # Linux/Mac
-
-# Interactive mode (will prompt for keys)
-python spspend.py
-
-# With arguments
-python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY -b 890000
-
-# Export to JSON
-python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --export utxos.json
-
-# With Electrum server for status checking
-python spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY \
-    --electrum-server electrum.blockstream.info
-
-# When finished
-deactivate
-```
-
-#### Full Command-Line Options
-
-```
-usage: spspend.py [-h] [--host HOST] [--port PORT] [--plain-tcp]
-                  [--no-verify-cert] [--timeout TIMEOUT]
-                  [--electrum-server ELECTRUM_HOST]
-                  [--electrum-port ELECTRUM_PORT]
-                  [--scan-key SCAN_PRIVATE_KEY] [--spend-key SPEND_PUBLIC_KEY]
-                  [--spend-privkey SPEND_PRIVATE_KEY] [--start START]
-                  [--export EXPORT_FILE] [--quiet] [--ignore-spent]
-                  [--network {mainnet,testnet,testnet4,signet,regtest}]
-                  [--log-level {DEBUG,INFO,WARNING,ERROR}] [--version]
-
-Silent Payments UTXO Discovery Tool - Find and display Silent Payment UTXOs
-
-options:
-  -h, --help            show this help message and exit
-  --network, -n {mainnet,testnet,testnet4,signet,regtest}
-                        Bitcoin network to use (default: mainnet)
-  --log-level, -l {DEBUG,INFO,WARNING,ERROR}
-                        Logging level (default: INFO)
-  --version, -v         show program's version number and exit
-
-connection options:
-  --host, -H HOST       Frigate server host (default: 127.0.0.1)
-  --port, -p PORT       Frigate server port (default: 57002 for SSL, 57001 for
-                        TCP)
-  --plain-tcp           Use plain TCP instead of SSL (default: SSL)
-  --no-verify-cert      Disable SSL certificate verification (default:
-                        enabled)
-  --timeout TIMEOUT     Socket timeout in seconds (default: no timeout)
-
-electrum server options (optional):
-  --electrum-server ELECTRUM_HOST
-                        Electrum server host for UTXO status checking (e.g.,
-                        electrum.blockstream.info)
-  --electrum-port ELECTRUM_PORT
-                        Electrum server port (default: 50002 for SSL, 50001
-                        for TCP)
-
-key options:
-  --scan-key, -s SCAN_PRIVATE_KEY
-                        Scan private key (64 hex characters)
-  --spend-key, -S SPEND_PUBLIC_KEY
-                        Spend public key (66 hex characters)
-  --spend-privkey, -P SPEND_PRIVATE_KEY
-                        Spend private key (64 hex characters) - OPTIONAL: If
-                        provided, will derive private keys for each UTXO
-
-scanning options:
-  --start, -b START     Start block height or timestamp
-  --export, -e EXPORT_FILE
-                        Export UTXOs to JSON file
-  --quiet, -q           Disable progress output
-  --ignore-spent        TESTING ONLY: Ignore spent status when offering to
-                        sweep UTXOs
-
-Examples:
-  # Interactive mode
-  spspend.py
-
-  # Discover UTXOs with specific keys
-  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY
-
-  # Start scanning from specific block
-  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY -b 890000
-
-  # Export UTXOs to JSON file
-  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --export utxos.json
-
-  # Use Electrum server for UTXO status checking
-  spspend.py -s SCAN_KEY -S SPEND_PUBLIC_KEY --electrum-server electrum.blockstream.info
-```
-
-### As a Python Library
-
-**Note**: This interface is currently untested and experimental.
-
-Import and use programmatically:
-
-```python
-import asyncio
-from spspend_lib.backend.clients import SilentPaymentsClient
-from spspend_lib.backend.scanner import SilentPaymentScanner
-from spspend_lib.frontend.events import EventBus
-
-async def scan_for_utxos():
-    # Create client and event bus
-    client = SilentPaymentsClient('localhost', 50001)
-    event_bus = EventBus()
-
-    # Set up event handlers
-    async def on_utxo_found(event):
-        print(f"Found UTXO: {event.data['utxo']}")
-
-    event_bus.on(EventType.UTXO_FOUND, on_utxo_found)
-
-    # Create scanner
-    scanner = SilentPaymentScanner(
-        client=client,
-        scan_private_key="your_scan_key",
-        spend_public_key="your_spend_key",
-        network='mainnet',
-        event_bus=event_bus
-    )
-
-    # Run scan
-    async with client.connect():
-        utxos = await scanner.scan()
-
-    return utxos
-
-# Run it
-utxos = asyncio.run(scan_for_utxos())
-```
-
-### Custom Frontend Example
-
-**Note**: This interface is currently untested and experimental.
-
-Create a custom UI by implementing FrontendInterface:
-
-```python
-from spspend_lib.frontend.base import FrontendInterface
-from spspend_lib.app import SilentPaymentApp
-
-class WebFrontend(FrontendInterface):
-    def __init__(self, websocket):
-        self.ws = websocket
-
-    async def show_scan_progress(self, progress: float, tx_count: int):
-        await self.ws.send_json({
-            'type': 'scan_progress',
-            'progress': progress,
-            'tx_count': tx_count
-        })
-
-    # Implement other abstract methods...
-
-# Use it
-app = SilentPaymentApp(
-    frigate_client=client,
-    electrum_client=None,
-    frontend=WebFrontend(websocket),
-    network='mainnet'
-)
 ```
 
 ## Running Tests
