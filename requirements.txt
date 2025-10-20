@@ -1,0 +1,62 @@
+# Silent Payments UTXO Discovery Tool - Complete Dependencies
+# Python 3.13+ required
+#
+# This file includes all dependencies (both direct and transitive) for maximum
+# compatibility across all systems and distributions.
+
+# ============================================================================
+# Core Cryptography Dependencies
+# ============================================================================
+coincurve==21.0.0        # ECDSA/Schnorr cryptography (secp256k1)
+embit==0.8.0             # Bitcoin primitives, Bech32 encoding
+gmpy2==2.2.1             # Fast modular arithmetic
+
+# ============================================================================
+# Encoding Dependencies
+# ============================================================================
+base58==2.1.1            # Base58 encoding for WIF
+
+# ============================================================================
+# CLI/UI Dependencies
+# ============================================================================
+questionary==2.1.1       # Interactive CLI prompts
+progressbar2==4.5.0      # Progress bars
+prompt_toolkit==3.0.52   # Terminal interface toolkit (required by questionary)
+wcwidth==0.2.14          # Unicode width calculations (required by prompt_toolkit)
+
+# ============================================================================
+# Utility Dependencies
+# ============================================================================
+python-utils==3.9.0      # Python utilities (required by progressbar2)
+typing_extensions==4.12.2 # Backported typing features (required by python-utils)
+six==1.17.0              # Python 2/3 compatibility utilities
+
+# ============================================================================
+# Network Dependencies
+# ============================================================================
+requests==2.32.4         # HTTP requests library
+urllib3==2.3.0           # HTTP client (required by requests)
+charset-normalizer==3.4.1 # Character encoding detection (required by requests)
+idna==3.10               # Internationalized domain names (required by requests)
+certifi>=2017.4.17       # Mozilla's CA bundle for SSL (required by requests)
+
+# ============================================================================
+# Optional: SOCKS Proxy Support
+# ============================================================================
+PySocks==1.7.1           # SOCKS proxy support (optional, for Tor/proxy usage)
+
+# ============================================================================
+# Optional: Testing
+# ============================================================================
+# pytest>=8.0.0          # Alternative test runner (uncomment if needed)
+
+# ============================================================================
+# Note: The following are Python standard library modules and do NOT need
+# to be installed via pip (included here for reference only):
+#   - asyncio (async I/O)
+#   - ssl (SSL/TLS support)
+#   - json (JSON parsing)
+#   - argparse (CLI argument parsing)
+#   - logging (Logging framework)
+#   - hashlib (Cryptographic hashing)
+# ============================================================================
