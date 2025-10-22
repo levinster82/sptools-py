@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-10-22
+
+### Fixed
+- Fixed scanner to accumulate transaction history from Frigate server notifications
+  - Previously replaced transaction history on each notification, only keeping the most recent batch
+  - Now accumulates all transactions across notifications to prevent data loss
+  - Tracks seen tx_hashes to avoid duplicates when server sends overlapping data
+  - Ensures all historical transactions are discovered, not just the latest ones
+
+### Added
+- Debug logging for raw Frigate server requests and responses
+  - Logs outgoing JSON-RPC requests with full parameters
+  - Logs incoming notifications with complete server response data
+  - Helps diagnose server-side issues and protocol behavior
+
 ## [0.1.1] - 2025-10-22
 
 ### Fixed

@@ -5,7 +5,7 @@ A modular, async, event-driven implementation of the BIP-352 Silent Payments
 specification for discovering and sweeping Bitcoin Silent Payment UTXOs.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "levinster82"
 __license__ = "GPL-3.0"
 

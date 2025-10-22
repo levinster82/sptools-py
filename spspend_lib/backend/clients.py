@@ -11,10 +11,13 @@ Both clients use asyncio streams for non-blocking I/O operations.
 import asyncio
 import json
 import ssl
+import logging
 from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
 
 from ..core.constants import SOCKET_TIMEOUT, SHUTDOWN_TIMEOUT
+
+logger = logging.getLogger('spspend.clients')
 
 
 class ElectrumClient:
@@ -126,6 +129,9 @@ class ElectrumClient:
             "method": method,
             "params": params
         }
+
+        # Log raw request being sent to server
+        logger.debug(f"Sending request to server: {request}")
 
         request_json = json.dumps(request) + "\n"
 
@@ -290,6 +296,9 @@ class SilentPaymentsClient:
             "method": method,
             "params": params
         }
+
+        # Log raw request being sent to server
+        logger.debug(f"Sending request to server: {request}")
 
         request_json = json.dumps(request) + "\n"
 

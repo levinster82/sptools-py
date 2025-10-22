@@ -152,6 +152,9 @@ class SilentPaymentScanner:
         Args:
             params: Notification parameters (dict with subscription, progress, history)
         """
+        # Log raw notification from Frigate server
+        logger.debug(f"Raw notification from Frigate: {params}")
+
         if not isinstance(params, dict):
             logger.warning(f"Unexpected params format: {type(params)}")
             return
@@ -161,11 +164,23 @@ class SilentPaymentScanner:
         progress = params.get('progress', 0.0)
         history_data = params.get('history', [])
 
+        logger.debug(f"Parsed notification - progress: {progress}, history items: {len(history_data)}")
+
         self.current_progress = progress
         self.sp_address = subscription.get('address', self.sp_address)
 
-        # Parse transaction history
-        self.transaction_history = [TxEntry.from_dict(tx) for tx in history_data]
+        # Parse and accumulate transaction history (don't replace, add new ones)
+        # Frigate sends incremental updates, so we need to merge new transactions
+        new_transactions = [TxEntry.from_dict(tx) for tx in history_data]
+
+        # Track existing tx_hashes to avoid duplicates
+        existing_hashes = {tx.tx_hash for tx in self.transaction_history}
+
+        # Add only new transactions
+        for tx in new_transactions:
+            if tx.tx_hash not in existing_hashes:
+                self.transaction_history.append(tx)
+                existing_hashes.add(tx.tx_hash)
 
         # Emit progress event
         await self.event_bus.emit(Event(
@@ -178,7 +193,7 @@ class SilentPaymentScanner:
             source='scanner'
         ))
 
-        logger.debug(f"Scan progress: {int(progress * 100)}%, {len(self.transaction_history)} transactions")
+        logger.debug(f"Scan progress: {int(progress * 100)}%, {len(self.transaction_history)} transactions (added {len(new_transactions)} this update)")
 
         # Check if scan is complete
         if progress >= 1.0:
