@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-10-22
+
+### Fixed
+- Fixed scanner to detect all Silent Payment outputs when multiple outputs belong to the same recipient
+  - Previously only checked k=0, missing all subsequent outputs (k=1, k=2, etc.)
+  - Now correctly tries all k values for each eligible output per BIP-352
+  - Handles shuffled output ordering for privacy (e.g., output 6 may use k=3)
+  - Tracks used k values to prevent duplicate matches
+  - Significantly improves UTXO discovery in transactions with multiple Silent Payment outputs
+
 ## [0.1.0] - 2025-10-20
 
 ### Added

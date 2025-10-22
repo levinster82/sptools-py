@@ -223,47 +223,71 @@ class SilentPaymentScanner:
             logger.error(f"Failed to fetch transaction {tx_entry.tx_hash}: {e}")
             return
 
-        # Derive expected output public key
-        try:
-            logger.debug(f"Server tweak_key: {tx_entry.tweak_key} (length: {len(tx_entry.tweak_key)} chars)")
+        logger.debug(f"Server tweak_key: {tx_entry.tweak_key} (length: {len(tx_entry.tweak_key)} chars)")
 
-            expected_pubkey, t_k = derive_output_pubkey(
-                self.spend_public_key,
-                tx_entry.tweak_key,
-                self.scan_private_key
-            )
+        # BIP-352: When a sender creates multiple outputs for the same recipient,
+        # each output uses k = 0, 1, 2, ... to derive different pubkeys.
+        # Outputs can be shuffled for privacy, so we try all k values for each output.
 
-            logger.debug(f"Expected output pubkey: x={format(expected_pubkey[0], '064x')}")
-            logger.debug(f"Derived tweak scalar t_k: {t_k[:16]}...")
-
-        except Exception as e:
-            logger.error(f"Failed to derive expected pubkey for {tx_entry.tx_hash}: {e}")
-            return
-
-        # Check each output for matches
         vout_list = tx_data.get('vout', [])
         logger.debug(f"Transaction {tx_entry.tx_hash} has {len(vout_list)} outputs")
 
-        for vout_idx, vout in enumerate(vout_list):
+        # Count eligible outputs (taproot or segwit v0)
+        eligible_outputs = [(idx, vout) for idx, vout in enumerate(vout_list)
+                           if vout.get('scriptPubKey', {}).get('type') in ['witness_v1_taproot', 'witness_v0_keyhash']]
+
+        if not eligible_outputs:
+            logger.debug("No eligible outputs found")
+            return
+
+        # Generate pubkeys for all possible k values (0 to num_eligible_outputs - 1)
+        k_to_pubkey = {}
+        for k in range(len(eligible_outputs)):
+            try:
+                expected_pubkey, t_k = derive_output_pubkey(
+                    self.spend_public_key,
+                    tx_entry.tweak_key,
+                    self.scan_private_key,
+                    k=k
+                )
+                k_to_pubkey[k] = (expected_pubkey, t_k)
+            except Exception as e:
+                logger.error(f"Failed to derive expected pubkey for k={k}: {e}")
+
+        # Track which k values have been matched to avoid duplicates
+        used_k_values = set()
+
+        # Check each eligible output against all k values
+        for vout_idx, vout in eligible_outputs:
             script_pubkey = vout.get('scriptPubKey', {})
             script_type = script_pubkey.get('type', '')
             script_hex = script_pubkey.get('hex', '')
 
             logger.debug(f"  Output {vout_idx}: type={script_type}, hex={script_hex[:20]}...")
 
-            # Only check relevant output types
-            if script_type not in ['witness_v1_taproot', 'witness_v0_keyhash']:
-                continue
+            # Try all k values for this output
+            matched_k = None
+            for k in range(len(eligible_outputs)):
+                if k in used_k_values or k not in k_to_pubkey:
+                    continue
 
-            # Check if output matches our expected public key
-            matches = pubkey_matches_output(expected_pubkey, script_hex, script_type)
+                expected_pubkey, t_k = k_to_pubkey[k]
+                matches = pubkey_matches_output(expected_pubkey, script_hex, script_type)
 
-            if not matches:
-                logger.debug(f"Output {vout_idx} does not match expected pubkey, skipping")
+                if matches:
+                    matched_k = k
+                    used_k_values.add(k)
+                    logger.info(f"Found matching Silent Payment output: {tx_entry.tx_hash}:{vout_idx} (k={k})")
+                    logger.debug(f"Expected pubkey for k={k}: x={format(expected_pubkey[0], '064x')}")
+                    logger.debug(f"Derived tweak scalar t_k: {t_k[:16]}...")
+                    break
+
+            if matched_k is None:
+                logger.debug(f"Output {vout_idx} does not match any expected pubkey, skipping")
                 continue
 
             # Found a matching output!
-            logger.info(f"Found matching Silent Payment output: {tx_entry.tx_hash}:{vout_idx}")
+            expected_pubkey, t_k = k_to_pubkey[matched_k]
 
             # Extract value
             value_btc = vout.get('value', 0)

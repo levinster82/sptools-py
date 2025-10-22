@@ -62,6 +62,7 @@ secrets.txt
 
 # Commit message files
 COMMIT_MSG.txt
+commit-msg.txt
 
 # Build artifacts
 *.whl

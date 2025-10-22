@@ -1,0 +1,39 @@
+RELEASE CHECKLIST
+=================
+
+1. Update version in spspend_lib/__init__.py
+   __version__ = "X.Y.Z"
+
+2. Update CHANGELOG.md
+   - Add new version section: ## [X.Y.Z] - YYYY-MM-DD
+   - Move items from [Unreleased] to the new version
+   - Add release notes under appropriate sections (Added/Changed/Fixed)
+
+3. Run tests
+   python -m unittest discover tests -v
+
+4. Commit changes
+   git add -A
+   git commit -m "Bump version to X.Y.Z"
+
+   OR (optional) use a commit message file for detailed commits:
+   - Create commit-msg.txt with your detailed message
+   - git commit -F commit-msg.txt
+   - rm commit-msg.txt
+
+5. Create git tag
+   git tag -a vX.Y.Z -m "Release version X.Y.Z"
+
+6. Push to remote
+   git push origin master --tags
+
+7. Create GitHub release
+   - Go to: https://github.com/levinster82/sptools-py/releases/new
+   - Select tag vX.Y.Z
+   - Copy changelog section as description
+   - Publish release
+
+VERSION FILES TO UPDATE
+=======================
+- spspend_lib/__init__.py (primary)
+- CHANGELOG.md
