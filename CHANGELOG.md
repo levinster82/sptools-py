@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Fixed scanner to properly handle Frigate server's parallel scan architecture
+  - Frigate performs mempool and block scans in parallel, sending separate notifications
+  - Scanner now tracks mempool_progress and block_progress independently
+  - Requires BOTH scans to reach 100% before completing (when doing historical scans)
+  - Uses notification `start_height` to reliably identify which scan is reporting
+  - Overall progress shows minimum of both scans to prevent premature completion UI
+  - Eliminates race condition where client disconnected after mempool scan but before block scan
+  - Ensures all historical transactions are discovered from block scan results
+- Added proper state reset when starting new scans
+  - Resets progress indicators, transaction history, and event flags
+  - Prevents state leakage when scanner is reused
+
 ## [0.1.2] - 2025-10-22
 
 ### Fixed

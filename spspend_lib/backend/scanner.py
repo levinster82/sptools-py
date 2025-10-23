@@ -60,6 +60,11 @@ class SilentPaymentScanner:
         self.discovered_utxos: List[UTXO] = []
         self.current_progress: float = 0.0
         self.scan_complete_event = asyncio.Event()
+        self.start_block: Optional[int] = None  # Track start block for scan
+
+        # Track separate progress for mempool and block scans
+        self.mempool_progress: float = 0.0
+        self.block_progress: float = 0.0
 
     async def scan(
         self,
@@ -77,6 +82,15 @@ class SilentPaymentScanner:
             List of discovered UTXOs
         """
         logger.info("Starting Silent Payment scan")
+
+        # Reset scan state for new scan
+        self.start_block = start
+        self.mempool_progress = 0.0
+        self.block_progress = 0.0
+        self.current_progress = 0.0
+        self.transaction_history = []
+        self.discovered_utxos = []
+        self.scan_complete_event.clear()
 
         try:
             # Subscribe to Silent Payments
@@ -166,12 +180,39 @@ class SilentPaymentScanner:
 
         logger.debug(f"Parsed notification - progress: {progress}, history items: {len(history_data)}")
 
-        self.current_progress = progress
         self.sp_address = subscription.get('address', self.sp_address)
 
         # Parse and accumulate transaction history (don't replace, add new ones)
         # Frigate sends incremental updates, so we need to merge new transactions
         new_transactions = [TxEntry.from_dict(tx) for tx in history_data]
+
+        # Determine if this notification is for mempool or block scan
+        # Use start_height from subscription to identify which scan sent this notification
+        notification_start_height = subscription.get('start_height', 0)
+
+        # Mempool transactions have height=0, block transactions have height>0
+        has_mempool = any(tx.height == 0 for tx in new_transactions) if new_transactions else False
+        has_blocks = any(tx.height > 0 for tx in new_transactions) if new_transactions else False
+
+        # Update appropriate progress indicator
+        if self.start_block and self.start_block > 0:
+            # When doing historical scan, track mempool and block progress separately
+            # Use notification_start_height to determine which scan is reporting
+            if notification_start_height == 0 or (has_mempool and not has_blocks):
+                # Mempool scan notification (start_height=0)
+                self.mempool_progress = progress
+                logger.debug(f"Mempool scan progress: {int(progress * 100)}%")
+            else:
+                # Block scan notification (start_height > 0)
+                self.block_progress = progress
+                logger.debug(f"Block scan progress: {int(progress * 100)}%")
+
+            # Calculate overall progress: use minimum to avoid premature 100% display
+            # This ensures we don't show completion until both scans finish
+            self.current_progress = min(self.mempool_progress, self.block_progress)
+        else:
+            # No historical scan, just use the progress as-is
+            self.current_progress = progress
 
         # Track existing tx_hashes to avoid duplicates
         existing_hashes = {tx.tx_hash for tx in self.transaction_history}
@@ -186,19 +227,34 @@ class SilentPaymentScanner:
         await self.event_bus.emit(Event(
             event_type=EventType.SCAN_PROGRESS,
             data={
-                'progress': progress,
+                'progress': self.current_progress,  # Use calculated overall progress
                 'address': self.sp_address,
                 'tx_count': len(self.transaction_history)
             },
             source='scanner'
         ))
 
-        logger.debug(f"Scan progress: {int(progress * 100)}%, {len(self.transaction_history)} transactions (added {len(new_transactions)} this update)")
+        logger.debug(f"Scan progress: {int(self.current_progress * 100)}%, {len(self.transaction_history)} transactions (added {len(new_transactions)} this update)")
 
         # Check if scan is complete
-        if progress >= 1.0:
-            logger.info("Scan progress reached 100%, processing transactions...")
+        # When doing historical scan, require BOTH mempool and block scans to complete
+        scan_complete = False
+        if self.start_block and self.start_block > 0:
+            # Historical scan: require both mempool and block progress at 100%
+            if self.mempool_progress >= 1.0 and self.block_progress >= 1.0:
+                scan_complete = True
+                logger.info(f"Both scans complete - Mempool: {int(self.mempool_progress * 100)}%, Block: {int(self.block_progress * 100)}%")
+            elif self.mempool_progress >= 1.0:
+                logger.debug(f"Mempool scan complete, waiting for block scan (block progress: {int(self.block_progress * 100)}%)")
+            elif self.block_progress >= 1.0:
+                logger.debug(f"Block scan complete, waiting for mempool scan (mempool progress: {int(self.mempool_progress * 100)}%)")
+        else:
+            # No historical scan, just check overall progress
+            if progress >= 1.0:
+                scan_complete = True
+                logger.info("Scan progress reached 100%, processing transactions...")
 
+        if scan_complete:
             # Process all transactions to discover UTXOs
             await self._process_transactions()
 
@@ -234,6 +290,9 @@ class SilentPaymentScanner:
         # Fetch full transaction details
         try:
             tx_data = await self.client.get_transaction(tx_entry.tx_hash, verbose=True)
+            if tx_data is None:
+                logger.error(f"Transaction {tx_entry.tx_hash} returned None (connection may have closed)")
+                return
         except Exception as e:
             logger.error(f"Failed to fetch transaction {tx_entry.tx_hash}: {e}")
             return

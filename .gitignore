@@ -51,6 +51,7 @@ htmlcov/
 # Project specific
 *.json.bak
 *.log
+debug/
 
 # Sensitive data
 *.key
