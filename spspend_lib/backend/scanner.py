@@ -367,29 +367,9 @@ class SilentPaymentScanner:
             value_btc = vout.get('value', 0)
             value_sats = int(value_btc * SATS_PER_BTC)
 
-            # Derive private key if spend_private_key was provided
-            derived_privkey = None
-            derived_privkey_wif = None
-
-            if self.spend_private_key:
-                try:
-                    derived_privkey = derive_privkey(
-                        self.spend_private_key,
-                        t_k,
-                        script_type
-                    )
-                    logger.debug(f"Derived private key for UTXO {tx_entry.tx_hash}:{vout_idx}")
-
-                    # Convert to WIF format
-                    derived_privkey_wif = privkey_to_wif(
-                        derived_privkey,
-                        script_type,
-                        self.network
-                    )
-                    logger.debug(f"Converted to WIF format: {derived_privkey_wif[:10]}...")
-
-                except Exception as e:
-                    logger.error(f"Failed to derive private key for UTXO {tx_entry.tx_hash}:{vout_idx}: {e}")
+            # NOTE: Private key derivation is now deferred until transaction signing
+            # This improves security by not keeping spend private key in memory during scan
+            # The tweak_key (t_k) is stored in the UTXO object for later derivation
 
             # Create UTXO object
             utxo = UTXO(
@@ -397,12 +377,12 @@ class SilentPaymentScanner:
                 vout=vout_idx,
                 value=value_sats,
                 height=tx_entry.height,
-                tweak_key=t_k,  # Store the BIP-352 tweak scalar
+                tweak_key=t_k,  # Store the BIP-352 tweak scalar for later derivation
                 script_pubkey=script_hex,
                 scriptPubKey_type=script_type,
                 scriptPubKey_address=script_pubkey.get('address', ''),
-                derived_privkey=derived_privkey,
-                derived_privkey_wif=derived_privkey_wif
+                derived_privkey=None,  # Will be derived on-demand during transaction signing
+                derived_privkey_wif=None  # Will be derived on-demand during transaction signing
             )
 
             self.discovered_utxos.append(utxo)

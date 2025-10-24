@@ -364,6 +364,16 @@ class FrontendInterface(ABC):
         pass
 
     @abstractmethod
+    def prompt_for_spend_private_key(self) -> Optional[str]:
+        """
+        Prompt user for spend private key (needed for signing).
+
+        Returns:
+            Spend private key (64 hex chars) or None if user cancels
+        """
+        pass
+
+    @abstractmethod
     def show_transaction_building(self):
         """
         Display message that transaction is being built.

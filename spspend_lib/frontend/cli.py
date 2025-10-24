@@ -66,17 +66,6 @@ class CLIFrontend(FrontendInterface):
             if self.validate_key_format(spend_key, 66, "spend public key"):
                 break
 
-        # Prompt for optional spend private key
-        spend_privkey = None
-        spend_privkey_input = input("Enter spend private key (64 hex chars, optional - press Enter to skip): ").strip()
-        if spend_privkey_input:
-            if self.validate_key_format(spend_privkey_input, 64, "spend private key"):
-                spend_privkey = spend_privkey_input
-            else:
-                print("NOTE: Invalid spend private key format - WIF private keys cannot be derived")
-        else:
-            print("NOTE: Spend private key not provided - WIF private keys cannot be derived")
-
         # Prompt for optional start height/timestamp
         start = None
         start_input = input("Enter start block height or timestamp (optional, press Enter to skip): ").strip()
@@ -86,7 +75,8 @@ class CLIFrontend(FrontendInterface):
             except ValueError:
                 print("Invalid number format, skipping start height")
 
-        return scan_key, spend_key, spend_privkey, start
+        # Note: spend private key will be prompted later if needed for spending
+        return scan_key, spend_key, None, start
 
     def validate_key_format(self, key: str, expected_length: int, key_type: str) -> bool:
         """Validate hex key format."""
@@ -199,6 +189,7 @@ class CLIFrontend(FrontendInterface):
                 print("   Status: UNKNOWN")
 
             print(f"   Tweak Key: {utxo.tweak_key}")
+            # Note: Private keys are only shown if they've been derived (during transaction signing)
             if utxo.derived_privkey_wif:
                 print(f"   Private Key (WIF): {utxo.derived_privkey_wif}")
                 print(f"   Private Key (Hex): {utxo.derived_privkey}")
@@ -629,6 +620,37 @@ class CLIFrontend(FrontendInterface):
         """Ask user to confirm transaction before signing."""
         confirm = input("\nProceed with transaction? (y/n): ").strip().lower()
         return confirm == 'y'
+
+    def prompt_for_spend_private_key(self) -> Optional[str]:
+        """
+        Prompt user for spend private key (needed for signing).
+
+        Returns:
+            Spend private key (64 hex chars) or None if invalid/skipped
+        """
+        print("\n" + "=" * 70)
+        print("SPEND PRIVATE KEY REQUIRED FOR SIGNING")
+        print("=" * 70)
+        print("To sign this transaction, you must provide the spend private key.")
+        print("This key will only be used to sign the transaction and then cleared from memory.")
+
+        while True:
+            spend_privkey = input("\nEnter spend private key (64 hex chars): ").strip()
+
+            if not spend_privkey:
+                print("ERROR: Spend private key is required to sign the transaction.")
+                retry = input("Press Enter to try again, or 'q' to cancel: ").strip().lower()
+                if retry == 'q':
+                    return None
+                continue
+
+            if self.validate_key_format(spend_privkey, 64, "spend private key"):
+                return spend_privkey
+            else:
+                print("ERROR: Invalid spend private key format (must be 64 hex characters)")
+                retry = input("Press Enter to try again, or 'q' to cancel: ").strip().lower()
+                if retry == 'q':
+                    return None
 
     def show_transaction_building(self):
         """Display message that transaction is being built."""

@@ -52,6 +52,7 @@ htmlcov/
 *.json.bak
 *.log
 debug/
+dev/
 
 # Sensitive data
 *.key

@@ -122,9 +122,9 @@ class SilentPaymentApp:
             # Display results
             await self._display_results(spend_private_key)
 
-            # Handle sweeping if requested
-            if spend_private_key and self.discovered_utxos:
-                await self._handle_sweep(spend_private_key, ignore_spent)
+            # Handle sweeping if requested (spend key will be prompted during transaction signing)
+            if self.discovered_utxos:
+                await self._handle_sweep(ignore_spent)
 
             # Export if requested
             if export_file and self.discovered_utxos:
@@ -236,7 +236,8 @@ class SilentPaymentApp:
         Display scan results to user.
 
         Args:
-            spend_private_key: Spend private key (for address verification)
+            spend_private_key: Spend private key (unused - kept for compatibility)
+                              Note: Private keys are now derived on-demand during transaction signing
         """
         if not self.discovered_utxos:
             self.frontend.show_no_utxos_found()
@@ -246,32 +247,16 @@ class SilentPaymentApp:
         total_value = sum(utxo.value for utxo in self.discovered_utxos)
         self.frontend.show_utxo_summary(self.discovered_utxos, total_value)
 
-        # Show detailed info with address verification
-        for utxo in self.discovered_utxos:
-            if utxo.derived_privkey and spend_private_key:
-                try:
-                    # Verify address derivation
-                    derived_address = derive_address_from_privkey(
-                        utxo.derived_privkey,
-                        utxo.scriptPubKey_type,
-                        self.network,
-                        is_silent_payment=True
-                    )
-                    address_match = derived_address == utxo.scriptPubKey_address
-                    if not address_match:
-                        logger.warning(f"Address mismatch for UTXO {utxo.tx_hash}:{utxo.vout}")
-                except Exception as e:
-                    logger.error(f"Failed to verify address for UTXO {utxo.tx_hash}:{utxo.vout}: {e}")
-
+        # Show detailed info (private keys are not derived yet - will be derived during signing)
         self.frontend.show_utxo_details(self.discovered_utxos, self.network)
 
-    async def _handle_sweep(self, spend_private_key: str, ignore_spent: bool = False):
+    async def _handle_sweep(self, ignore_spent: bool = False):
         """
         Handle interactive UTXO sweeping workflow.
 
         Args:
-            spend_private_key: Spend private key (required for signing)
             ignore_spent: If True, allow sweeping spent UTXOs (testing)
+                         Note: Spend private key will be prompted during transaction signing
         """
         # Filter to unspent UTXOs
         if ignore_spent:
@@ -460,10 +445,53 @@ class SilentPaymentApp:
         """
         Build and sign transaction.
 
+        Prompts for spend private key, derives UTXO private keys on-demand,
+        then builds and signs the transaction.
+
         Args:
             selected_utxos: List of input UTXOs
             outputs: List of (address, amount) output tuples
         """
+        # Prompt for spend private key (needed for signing)
+        spend_private_key = self.frontend.prompt_for_spend_private_key()
+
+        if not spend_private_key:
+            logger.info("Transaction cancelled - no spend private key provided")
+            self.frontend.show_error("Transaction cancelled: spend private key is required for signing")
+            return
+
+        # Derive private keys for all selected UTXOs on-demand
+        logger.info(f"Deriving private keys for {len(selected_utxos)} UTXO(s)...")
+        from .core.crypto import derive_privkey
+        from .core.address import privkey_to_wif
+
+        for utxo in selected_utxos:
+            try:
+                # Derive private key using stored tweak_key
+                utxo.derived_privkey = derive_privkey(
+                    spend_private_key,
+                    utxo.tweak_key,
+                    utxo.scriptPubKey_type
+                )
+
+                # Also derive WIF format for display
+                utxo.derived_privkey_wif = privkey_to_wif(
+                    utxo.derived_privkey,
+                    utxo.scriptPubKey_type,
+                    self.network
+                )
+
+                logger.debug(f"Derived private key for UTXO {utxo.tx_hash}:{utxo.vout}")
+
+            except Exception as e:
+                logger.error(f"Failed to derive private key for UTXO {utxo.tx_hash}:{utxo.vout}: {e}")
+                self.frontend.show_error(f"Failed to derive private key for UTXO {utxo.tx_hash}:{utxo.vout}: {e}")
+                return
+
+        # Clear spend private key from memory (we now have derived keys)
+        spend_private_key = None
+        logger.debug("Spend private key cleared from memory")
+
         self.frontend.show_transaction_building()
 
         try:

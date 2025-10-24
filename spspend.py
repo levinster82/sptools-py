@@ -48,8 +48,7 @@ async def async_main(args):
         scan_key, spend_key, spend_privkey, start = frontend.prompt_for_keys()
         args.scan_private_key = args.scan_private_key or scan_key
         args.spend_public_key = args.spend_public_key or spend_key
-        if not args.spend_private_key:
-            args.spend_private_key = spend_privkey
+        # Note: spend_privkey is always None from prompt_for_keys() - will be prompted during signing
         if args.start is None:
             args.start = start
 
@@ -61,12 +60,12 @@ async def async_main(args):
         frontend.show_error("Invalid spend public key format")
         return 1
 
-    # Validate spend private key if provided
+    # Warn if spend private key provided via -P flag (deprecated behavior)
     if args.spend_private_key:
-        if not validate_key_format(args.spend_private_key, 64, "spend private key"):
-            frontend.show_error("Invalid spend private key format")
-            return 1
-        logger.info("Spend private key provided - will derive UTXO private keys")
+        logger.warning("WARNING: The -P/--spend-privkey flag is deprecated for security reasons")
+        logger.warning("The spend private key will now be prompted only when needed for transaction signing")
+        logger.warning("The value provided via -P will be ignored")
+        args.spend_private_key = None  # Clear it - will be prompted later if needed
 
     # Get network display name
     network_name = get_network_display_name(args.network)
