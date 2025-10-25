@@ -279,6 +279,62 @@ def validate_transaction(tx_hex: str, expected_inputs: int, expected_outputs: in
         return False, f"Could not parse serialized transaction: {e}"
 
 
+def calculate_vbytes_from_tx_hex(tx_hex: str) -> int:
+    """
+    Calculate the virtual size (vbytes) of a serialized transaction.
+
+    For SegWit transactions (including Taproot), vbytes are calculated as:
+    vbytes = (base_size * 3 + total_size) / 4
+
+    Where:
+    - base_size = transaction without witness data
+    - total_size = full transaction including witness data
+
+    Args:
+        tx_hex: Serialized transaction in hexadecimal
+
+    Returns:
+        Virtual size in vbytes
+    """
+    from embit.transaction import Transaction
+
+    # Parse the transaction
+    tx_bytes = bytes.fromhex(tx_hex)
+    tx = Transaction.parse(tx_bytes)
+
+    # Serialize without witness data to get base size
+    # embit doesn't have a direct method for this, so we'll use the standard formula
+    # For Taproot: total_size is the full serialized size
+    total_size = len(tx_bytes)
+
+    # Calculate base size (non-witness data)
+    # For each input, witness data is ~65 bytes (1 byte length + 64 byte signature)
+    # Plus 2 bytes for witness marker and flag, plus witness stack count bytes
+    witness_overhead = 2  # marker (0x00) + flag (0x01)
+    witness_data_size = 0
+
+    for inp in tx.vin:
+        if inp.witness:
+            # Count witness stack items
+            witness_data_size += 1  # stack item count (varint, usually 1 byte)
+            for item in inp.witness.items:
+                # Each item: length prefix + data
+                item_len = len(item)
+                if item_len < 253:
+                    witness_data_size += 1 + item_len
+                elif item_len <= 0xffff:
+                    witness_data_size += 3 + item_len
+                else:
+                    witness_data_size += 5 + item_len
+
+    base_size = total_size - witness_overhead - witness_data_size
+
+    # Calculate vbytes using BIP 141 formula
+    vbytes = (base_size * 3 + total_size) // 4
+
+    return vbytes
+
+
 def estimate_transaction_vbytes(num_inputs: int, num_outputs: int) -> int:
     """
     Estimate the virtual size (vbytes) of a transaction.

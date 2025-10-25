@@ -438,10 +438,20 @@ class SilentPaymentApp:
             logger.info("Transaction cancelled by user")
             return
 
-        # Build and sign transaction
-        await self._build_transaction(selected_utxos, outputs)
+        # Build and sign transaction (with fee confirmation loop)
+        while True:
+            tx_accepted = await self._build_transaction(selected_utxos, outputs, estimated_fee, fee_rate)
+            if tx_accepted:
+                # Transaction was accepted and displayed
+                break
+            else:
+                # User rejected the actual fee rate, recalculate
+                logger.info("User rejected actual fee rate, restarting fee calculation")
+                # Restart from fee calculation
+                await self._calculate_and_confirm_fee(selected_utxos, outputs, total_input_value)
+                break  # Exit loop since we're recursing
 
-    async def _build_transaction(self, selected_utxos: List[UTXO], outputs: List[tuple]):
+    async def _build_transaction(self, selected_utxos: List[UTXO], outputs: List[tuple], estimated_fee: int, estimated_fee_rate: float) -> bool:
         """
         Build and sign transaction.
 
@@ -451,6 +461,11 @@ class SilentPaymentApp:
         Args:
             selected_utxos: List of input UTXOs
             outputs: List of (address, amount) output tuples
+            estimated_fee: Estimated fee in sats (used to calculate actual fee rate)
+            estimated_fee_rate: Estimated fee rate in sat/vB
+
+        Returns:
+            True if user accepted the transaction, False if rejected
         """
         # Prompt for spend private key (needed for signing)
         spend_private_key = self.frontend.prompt_for_spend_private_key()
@@ -458,7 +473,7 @@ class SilentPaymentApp:
         if not spend_private_key:
             logger.info("Transaction cancelled - no spend private key provided")
             self.frontend.show_error("Transaction cancelled: spend private key is required for signing")
-            return
+            return False
 
         # Derive private keys for all selected UTXOs on-demand
         logger.info(f"Deriving private keys for {len(selected_utxos)} UTXO(s)...")
@@ -486,7 +501,7 @@ class SilentPaymentApp:
             except Exception as e:
                 logger.error(f"Failed to derive private key for UTXO {utxo.tx_hash}:{utxo.vout}: {e}")
                 self.frontend.show_error(f"Failed to derive private key for UTXO {utxo.tx_hash}:{utxo.vout}: {e}")
-                return
+                return False
 
         # Clear spend private key from memory (we now have derived keys)
         spend_private_key = None
@@ -500,11 +515,30 @@ class SilentPaymentApp:
             tx_outputs = [TxOutput(address=addr, amount=amt) for addr, amt in outputs]
 
             tx_hex, txid = build_and_sign_transaction(selected_utxos, tx_outputs)
-            self.frontend.show_signed_transaction(tx_hex, txid)
+
+            # Calculate actual transaction sizes
+            from .core.transaction_builder import calculate_vbytes_from_tx_hex
+            actual_tx_bytes = len(tx_hex) // 2  # Total size in bytes
+            actual_vbytes = calculate_vbytes_from_tx_hex(tx_hex)  # Virtual size
+            actual_fee_rate = estimated_fee / actual_vbytes  # sats per vbyte
+
             logger.info(f"Transaction built successfully: {txid}")
+
+            # Ask user to confirm the actual fee rate BEFORE showing transaction
+            if not self.frontend.prompt_accept_final_fee(actual_fee_rate, estimated_fee_rate):
+                logger.info("User rejected actual fee rate")
+                return False
+
+            # User accepted - now show the signed transaction
+            self.frontend.show_signed_transaction(tx_hex, txid, estimated_fee, actual_tx_bytes, actual_vbytes, actual_fee_rate)
+
+            # User accepted the transaction
+            return True
+
         except Exception as e:
             logger.error(f"Failed to build transaction: {e}")
             self.frontend.show_error(f"Failed to build transaction: {e}")
+            return False
 
     async def _export_results(self, export_file: str):
         """

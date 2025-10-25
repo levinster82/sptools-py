@@ -364,6 +364,20 @@ class FrontendInterface(ABC):
         pass
 
     @abstractmethod
+    def prompt_accept_final_fee(self, actual_fee_rate: float, estimated_fee_rate: float) -> bool:
+        """
+        Ask user to accept the final actual fee rate after transaction is signed.
+
+        Args:
+            actual_fee_rate: Actual fee rate in sat/vB from signed transaction
+            estimated_fee_rate: Originally estimated fee rate in sat/vB
+
+        Returns:
+            True if user accepts, False to recalculate fee
+        """
+        pass
+
+    @abstractmethod
     def prompt_for_spend_private_key(self) -> Optional[str]:
         """
         Prompt user for spend private key (needed for signing).
@@ -381,13 +395,17 @@ class FrontendInterface(ABC):
         pass
 
     @abstractmethod
-    def show_signed_transaction(self, tx_hex: str, txid: str):
+    def show_signed_transaction(self, tx_hex: str, txid: str, fee: int, tx_bytes: int, tx_vbytes: int, fee_rate: float):
         """
         Display signed transaction details.
 
         Args:
             tx_hex: Transaction hex
             txid: Transaction ID
+            fee: Actual fee in satoshis
+            tx_bytes: Actual transaction size in bytes (total)
+            tx_vbytes: Actual transaction virtual size in vbytes (for fee calculation)
+            fee_rate: Actual fee rate in sat/vB
         """
         pass
 

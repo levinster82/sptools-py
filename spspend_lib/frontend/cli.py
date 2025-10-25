@@ -621,6 +621,22 @@ class CLIFrontend(FrontendInterface):
         confirm = input("\nProceed with transaction? (y/n): ").strip().lower()
         return confirm == 'y'
 
+    def prompt_accept_final_fee(self, actual_fee_rate: float, estimated_fee_rate: float) -> bool:
+        """Ask user to accept the final actual fee rate."""
+        print("\n" + "=" * 70)
+        print("FINAL FEE CONFIRMATION:")
+        print("=" * 70)
+        print(f"Estimated fee rate: {estimated_fee_rate:.2f} sat/vB")
+        print(f"Actual fee rate:    {actual_fee_rate:.2f} sat/vB")
+
+        # Show difference if significant
+        diff_percent = abs(actual_fee_rate - estimated_fee_rate) / estimated_fee_rate * 100 if estimated_fee_rate > 0 else 0
+        if diff_percent > 1:
+            print(f"Difference: {diff_percent:.1f}%")
+
+        confirm = input("\nAccept final fee rate? (y/n, 'n' to recalculate): ").strip().lower()
+        return confirm == 'y'
+
     def prompt_for_spend_private_key(self) -> Optional[str]:
         """
         Prompt user for spend private key (needed for signing).
@@ -658,9 +674,12 @@ class CLIFrontend(FrontendInterface):
         print("Building transaction...")
         print("=" * 70)
 
-    def show_signed_transaction(self, tx_hex: str, txid: str):
+    def show_signed_transaction(self, tx_hex: str, txid: str, fee: int, tx_bytes: int, tx_vbytes: int, fee_rate: float):
         """Display signed transaction details."""
         print(f"\nCalculated TXID: {txid}")
+        print(f"Transaction size: {tx_bytes} bytes")
+        print(f"Virtual size: {tx_vbytes} vB")
+        print(f"Actual fee: {fee:,} sats ({fee_rate:.2f} sat/vB)")
         print("\n" + "=" * 70)
         print("SIGNED TRANSACTION:")
         print("=" * 70)
