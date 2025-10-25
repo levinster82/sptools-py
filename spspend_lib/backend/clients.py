@@ -183,6 +183,18 @@ class ElectrumClient:
         """
         return await self._send_request("blockchain.scripthash.get_history", [scripthash])
 
+    async def estimate_fee(self, blocks: int = 6) -> float:
+        """
+        Estimate fee for confirmation in N blocks.
+
+        Args:
+            blocks: Target number of blocks for confirmation
+
+        Returns:
+            Fee rate in BTC/kB
+        """
+        return await self._send_request("blockchain.estimatefee", [blocks])
+
 
 class SilentPaymentsClient:
     """

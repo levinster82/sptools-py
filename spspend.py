@@ -96,50 +96,44 @@ async def async_main(args):
             )
             logger.info(f"Electrum server configured: {args.electrum_host}:{args.electrum_port}")
 
-        # Connect to Frigate server
+        # Create application
+        app = SilentPaymentApp(
+            frigate_client=frigate_client,
+            electrum_client=electrum_client,
+            frontend=frontend,
+            network=args.network,
+            network_name=network_name
+        )
+
+        # Phase 1: Scan for UTXOs (requires Frigate connection)
         async with frigate_client.connect():
             logger.info(f"Connected to Frigate server {args.host}:{args.port}")
 
-            # Connect to Electrum server if configured
-            if electrum_client:
-                async with electrum_client.connect():
-                    logger.info(f"Connected to Electrum server {args.electrum_host}:{args.electrum_port}")
+            await app.scan(
+                scan_private_key=args.scan_private_key,
+                spend_public_key=args.spend_public_key,
+                spend_private_key=args.spend_private_key,
+                start=args.start
+            )
 
-                    # Create and run application
-                    app = SilentPaymentApp(
-                        frigate_client=frigate_client,
-                        electrum_client=electrum_client,
-                        frontend=frontend,
-                        network=args.network,
-                        network_name=network_name
-                    )
+            logger.info("Frigate connection closed after scanning")
+        # Frigate connection is now closed
 
-                    return await app.run(
-                        scan_private_key=args.scan_private_key,
-                        spend_public_key=args.spend_public_key,
-                        spend_private_key=args.spend_private_key,
-                        start=args.start,
-                        export_file=args.export_file,
-                        ignore_spent=args.ignore_spent
-                    )
-            else:
-                # No Electrum server - run with just Frigate
-                app = SilentPaymentApp(
-                    frigate_client=frigate_client,
-                    electrum_client=None,
-                    frontend=frontend,
-                    network=args.network,
-                    network_name=network_name
-                )
+        # Phase 2: Interactive operations (requires Electrum if configured, no Frigate needed)
+        if electrum_client:
+            async with electrum_client.connect():
+                logger.info(f"Connected to Electrum server {args.electrum_host}:{args.electrum_port}")
 
-                return await app.run(
-                    scan_private_key=args.scan_private_key,
-                    spend_public_key=args.spend_public_key,
-                    spend_private_key=args.spend_private_key,
-                    start=args.start,
+                return await app.interactive(
                     export_file=args.export_file,
                     ignore_spent=args.ignore_spent
                 )
+        else:
+            # No Electrum server - continue without it
+            return await app.interactive(
+                export_file=args.export_file,
+                ignore_spent=args.ignore_spent
+            )
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")

@@ -67,23 +67,58 @@ class SilentPaymentApp:
         self.discovered_utxos: List[UTXO] = []
         self.sp_address: Optional[str] = None
 
-    async def run(
+    async def scan(
         self,
         scan_private_key: str,
         spend_public_key: str,
         spend_private_key: Optional[str] = None,
-        start: Optional[int] = None,
-        export_file: Optional[str] = None,
-        ignore_spent: bool = False
-    ) -> int:
+        start: Optional[int] = None
+    ):
         """
-        Run the complete Silent Payment workflow.
+        Scan for Silent Payment UTXOs (requires Frigate connection).
 
         Args:
             scan_private_key: Scan private key (64 hex chars)
             spend_public_key: Spend public key (66 hex chars)
             spend_private_key: Optional spend private key for deriving UTXO keys
             start: Optional start block height or timestamp
+        """
+        # Setup event handlers
+        await self._setup_event_handlers()
+
+        # Show network info
+        self.frontend.show_network_info(self.network_name)
+
+        # Get server info
+        try:
+            version = await self.frigate_client.get_server_version()
+            banner = await self.frigate_client.get_server_banner()
+            self.frontend.show_server_info(banner, version)
+            logger.info(f"Connected to: {banner}")
+            logger.info(f"Server version: {version}")
+        except Exception as e:
+            logger.warning(f"Could not get server info: {e}")
+
+        # Run scan
+        await self._run_scan(
+            scan_private_key,
+            spend_public_key,
+            spend_private_key,
+            start
+        )
+
+        logger.info(f"Scan complete, found {len(self.discovered_utxos)} UTXO(s)")
+
+    async def interactive(
+        self,
+        export_file: Optional[str] = None,
+        ignore_spent: bool = False
+    ) -> int:
+        """
+        Interactive workflow for checking status, sweeping, and exporting UTXOs.
+        (Does not require Frigate connection)
+
+        Args:
             export_file: Optional file path for exporting results
             ignore_spent: If True, allow sweeping spent UTXOs (testing only)
 
@@ -91,36 +126,12 @@ class SilentPaymentApp:
             Exit code (0 for success, 1 for error)
         """
         try:
-            # Setup event handlers
-            await self._setup_event_handlers()
-
-            # Show network info
-            self.frontend.show_network_info(self.network_name)
-
-            # Get server info
-            try:
-                version = await self.frigate_client.get_server_version()
-                banner = await self.frigate_client.get_server_banner()
-                self.frontend.show_server_info(banner, version)
-                logger.info(f"Connected to: {banner}")
-                logger.info(f"Server version: {version}")
-            except Exception as e:
-                logger.warning(f"Could not get server info: {e}")
-
-            # Run scan
-            await self._run_scan(
-                scan_private_key,
-                spend_public_key,
-                spend_private_key,
-                start
-            )
-
             # Check spent status if UTXOs were found and Electrum is configured
             if self.discovered_utxos and self.electrum_client:
                 await self._check_spent_status()
 
             # Display results
-            await self._display_results(spend_private_key)
+            await self._display_results(None)
 
             # Handle sweeping if requested (spend key will be prompted during transaction signing)
             if self.discovered_utxos:
@@ -373,9 +384,9 @@ class SilentPaymentApp:
             outputs: List of (address, amount) output tuples
             total_input_value: Total input value in satoshis
         """
-        # Create fee estimator
+        # Create fee estimator (only works with Electrum client)
         fee_estimator = FeeEstimator(
-            client=self.frigate_client,
+            client=self.electrum_client,
             event_bus=self.event_bus
         )
 
@@ -384,11 +395,15 @@ class SilentPaymentApp:
         num_outputs = len(outputs)
         estimated_vbytes = fee_estimator.estimate_transaction_vbytes(num_inputs, num_outputs)
 
-        # Get fee rate from server
-        try:
-            suggested_fee_rate = await fee_estimator.estimate_fee_rate(blocks=6)
-        except Exception as e:
-            logger.warning(f"Could not get fee estimate: {e}")
+        # Get fee rate from server (only if Electrum client is available)
+        if self.electrum_client:
+            try:
+                suggested_fee_rate = await fee_estimator.estimate_fee_rate(blocks=6)
+            except Exception as e:
+                logger.warning(f"Could not get fee estimate: {e}")
+                suggested_fee_rate = fee_estimator.default_fee_rate
+        else:
+            # No Electrum server configured - use default
             suggested_fee_rate = fee_estimator.default_fee_rate
 
         # Show fee calculation
