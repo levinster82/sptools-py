@@ -65,6 +65,8 @@ class SilentPaymentScanner:
         # Track separate progress for mempool and block scans
         self.mempool_progress: float = 0.0
         self.block_progress: float = 0.0
+        self.block_scan_complete_time: Optional[float] = None  # Track when block scan finished
+        self.notification_task: Optional[asyncio.Task] = None  # Track notification listener task
 
     async def scan(
         self,
@@ -88,6 +90,7 @@ class SilentPaymentScanner:
         self.mempool_progress = 0.0
         self.block_progress = 0.0
         self.current_progress = 0.0
+        self.block_scan_complete_time = None
         self.transaction_history = []
         self.discovered_utxos = []
         self.scan_complete_event.clear()
@@ -111,19 +114,33 @@ class SilentPaymentScanner:
             ))
 
             # Start listening for notifications
-            notification_task = asyncio.create_task(
+            self.notification_task = asyncio.create_task(
                 self.client.listen_for_notifications(self._handle_notification)
             )
+
+            # Start timeout checker for mempool scan (only needed for historical scans)
+            timeout_task = None
+            if self.start_block and self.start_block > 0:
+                timeout_task = asyncio.create_task(self._check_mempool_timeout())
 
             # Wait for scan to complete
             await self.scan_complete_event.wait()
 
             # Cancel notification listener
-            notification_task.cancel()
-            try:
-                await notification_task
-            except asyncio.CancelledError:
-                pass
+            if self.notification_task:
+                self.notification_task.cancel()
+                try:
+                    await self.notification_task
+                except asyncio.CancelledError:
+                    pass
+
+            # Cancel timeout checker if running
+            if timeout_task:
+                timeout_task.cancel()
+                try:
+                    await timeout_task
+                except asyncio.CancelledError:
+                    pass
 
             # Emit scan complete event
             await self.event_bus.emit(Event(
@@ -207,6 +224,11 @@ class SilentPaymentScanner:
                 self.block_progress = progress
                 logger.debug(f"Block scan progress: {int(progress * 100)}%")
 
+                # Track when block scan completes for timeout handling
+                if progress >= 1.0 and self.block_scan_complete_time is None:
+                    self.block_scan_complete_time = asyncio.get_event_loop().time()
+                    logger.debug("Block scan complete, starting 15s timeout for mempool scan")
+
             # Calculate overall progress: use minimum to avoid premature 100% display
             # This ensures we don't show completion until both scans finish
             self.current_progress = min(self.mempool_progress, self.block_progress)
@@ -244,6 +266,15 @@ class SilentPaymentScanner:
             if self.mempool_progress >= 1.0 and self.block_progress >= 1.0:
                 scan_complete = True
                 logger.info(f"Both scans complete - Mempool: {int(self.mempool_progress * 100)}%, Block: {int(self.block_progress * 100)}%")
+            elif self.block_progress >= 1.0 and self.block_scan_complete_time is not None:
+                # Block scan complete, check if we should timeout waiting for mempool
+                time_since_block_complete = asyncio.get_event_loop().time() - self.block_scan_complete_time
+                if time_since_block_complete >= 15.0:
+                    # Timeout: assume mempool is empty (server doesn't send notification for empty mempool)
+                    scan_complete = True
+                    logger.info(f"Block scan complete, mempool timeout (15s) - assuming empty mempool. Block: {int(self.block_progress * 100)}%")
+                else:
+                    logger.debug(f"Block scan complete, waiting for mempool scan ({time_since_block_complete:.1f}s/{15.0}s timeout)")
             elif self.mempool_progress >= 1.0:
                 logger.debug(f"Mempool scan complete, waiting for block scan (block progress: {int(self.block_progress * 100)}%)")
             elif self.block_progress >= 1.0:
@@ -400,3 +431,35 @@ class SilentPaymentScanner:
                 },
                 source='scanner'
             ))
+
+    async def _check_mempool_timeout(self):
+        """
+        Background task that checks if mempool scan has timed out.
+
+        When block scan completes but no mempool notification arrives (because mempool is empty),
+        the server won't send a notification. This task checks every second if we've waited
+        15 seconds since block scan completed, and triggers completion if so.
+        """
+        while True:
+            await asyncio.sleep(1)  # Check every second
+
+            # Only check if block scan is complete
+            if self.block_progress >= 1.0 and self.block_scan_complete_time is not None:
+                time_since_block_complete = asyncio.get_event_loop().time() - self.block_scan_complete_time
+
+                if time_since_block_complete >= 15.0 and self.mempool_progress < 1.0:
+                    # Timeout reached - assume mempool is empty
+                    logger.info(f"Mempool timeout (15s) reached - assuming empty mempool")
+
+                    # Cancel notification listener to avoid socket conflicts
+                    if self.notification_task:
+                        self.notification_task.cancel()
+                        try:
+                            await self.notification_task
+                        except asyncio.CancelledError:
+                            pass
+
+                    # Process all transactions and mark scan complete
+                    await self._process_transactions()
+                    self.scan_complete_event.set()
+                    break
